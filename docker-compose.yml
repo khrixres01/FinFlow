@@ -1,0 +1,183 @@
+
+services:
+
+  # ── HADOOP ──────────────────────────────────────────────
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: namenode
+    restart: always
+    ports:
+      - "9870:9870"
+      - "9000:9000"
+    volumes:
+      - hadoop_namenode:/hadoop/dfs/name
+    environment:
+      - CLUSTER_NAME=finflow
+    env_file:
+      - ./docker/hadoop.env
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode
+    restart: always
+    ports:
+      - "9864:9864"
+    volumes:
+      - hadoop_datanode:/hadoop/dfs/data
+    environment:
+      SERVICE_PRECONDITION: "namenode:9870"
+    env_file:
+      - ./docker/hadoop.env
+
+  resourcemanager:
+    image: bde2020/hadoop-resourcemanager:2.0.0-hadoop3.2.1-java8
+    container_name: resourcemanager
+    restart: always
+    ports:
+      - "8088:8088"
+    environment:
+      SERVICE_PRECONDITION: "namenode:9000 namenode:9870 datanode:9864"
+    env_file:
+      - ./docker/hadoop.env
+
+  nodemanager:
+    image: bde2020/hadoop-nodemanager:2.0.0-hadoop3.2.1-java8
+    container_name: nodemanager
+    restart: always
+    environment:
+      SERVICE_PRECONDITION: "namenode:9000 namenode:9870 datanode:9864 resourcemanager:8088"
+    env_file:
+      - ./docker/hadoop.env
+
+  # ── HIVE ────────────────────────────────────────────────
+  hive-metastore-db:
+    image: postgres:13
+    container_name: hive-metastore-db
+    restart: always
+    environment:
+      POSTGRES_DB: metastore
+      POSTGRES_USER: hive
+      POSTGRES_PASSWORD: hive
+    volumes:
+      - hive_metastore_db:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+
+  hive-metastore:
+    image: bde2020/hive:2.3.2-postgresql-metastore
+    container_name: hive-metastore
+    restart: always
+    ports:
+      - "9083:9083"
+    command: /opt/hive/bin/hive --service metastore
+    environment:
+      SERVICE_PRECONDITION: "namenode:9000 namenode:9870 datanode:9864 hive-metastore-db:5432"
+    env_file:
+      - ./docker/hadoop.env
+    depends_on:
+      - hive-metastore-db
+
+  hive-server:
+    image: bde2020/hive:2.3.2-postgresql-metastore
+    container_name: hive-server
+    restart: always
+    ports:
+      - "10000:10000"
+      - "10002:10002"
+    environment:
+      SERVICE_PRECONDITION: "hive-metastore:9083"
+    env_file:
+      - ./docker/hadoop.env
+    depends_on:
+      - hive-metastore
+
+# ── SPARK ────────────────────────────────────────────────
+  spark-master:
+    image: apache/spark:3.5.0
+    container_name: spark-master
+    restart: always
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+    environment:
+      - SPARK_NO_DAEMONIZE=true
+
+  spark-worker:
+    image: apache/spark:3.5.0
+    container_name: spark-worker
+    restart: always
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
+    environment:
+      - SPARK_NO_DAEMONIZE=true
+      - SPARK_WORKER_MEMORY=2g
+      - SPARK_WORKER_CORES=2
+    depends_on:
+      - spark-master
+
+  # ── AIRFLOW ──────────────────────────────────────────────
+  airflow-db:
+    image: postgres:13
+    container_name: airflow-db
+    restart: always
+    environment:
+      POSTGRES_DB: airflow
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+    volumes:
+      - airflow_db:/var/lib/postgresql/data
+    ports:
+      - "5434:5432"
+
+  airflow-init:
+    image: apache/airflow:2.8.0
+    container_name: airflow-init
+    depends_on:
+      - airflow-db
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    command: bash -c "airflow db migrate && airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@finflow.com"
+
+  airflow-webserver:
+    image: apache/airflow:2.8.0
+    container_name: airflow-webserver
+    restart: always
+    depends_on:
+      - airflow-db
+      - airflow-init
+    ports:
+      - "8081:8080"
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+    command: webserver
+
+  airflow-scheduler:
+    image: apache/airflow:2.8.0
+    container_name: airflow-scheduler
+    restart: always
+    depends_on:
+      - airflow-db
+      - airflow-init
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+    command: scheduler
+
+volumes:
+  hadoop_namenode:
+  hadoop_datanode:
+  hive_metastore_db:
+  airflow_db:

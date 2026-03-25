@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.env
+venv/
+env/
+
+# Data files — never commit large data files
+*.csv
+*.parquet
+*.gz
+*.zip
+
+# Airflow logs
+airflow/logs/
+
+# Docker volumes
+*.volume
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Credentials — never commit these
+*.env
+.env.*
+secrets/
