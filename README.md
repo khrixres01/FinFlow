@@ -52,4 +52,4 @@ finflow/
 - **Phase 5:** Reverse ETL — Fraud alerts to Slack + CRM sync
 
 ## Status
-🚧 In Progress
+In Progress
